@@ -34,3 +34,17 @@ def print_cuda_statistics():
     logger.info('Active CUDA Device: GPU {}'.format(torch.cuda.current_device()))
     logger.info('Available devices  {}'.format(torch.cuda.device_count()))
     logger.info('Current cuda device  {}'.format(torch.cuda.current_device()))
+
+
+def truncate_tokens_pair(tokens_a, tokens_b, max_len):
+    while True:
+        if len(tokens_a) + len(tokens_b) <= max_len:
+            break
+        if len(tokens_a) > len(tokens_b):
+            tokens_a.pop()
+        else:
+            tokens_b.pop()
+
+def get_random_word(vocab_words):
+    i = random.randint(0, len(vocab_words)-1)
+    return vocab_words[i]

@@ -6,7 +6,6 @@ import torch.nn.functional as F
 
 import json
 from easydict import EasyDict as edict
-from graphs.weights_initializer import weight_init
 from utils.tensor import split_last, merge_last
 
 class BertModel4Pretrain(nn.Module):
@@ -22,7 +21,7 @@ def gelu(x):
 
 class LayerNorm(nn.Module):
     "A layernorm module in the TF style (epsilon inside the square root)."
-    def __init_(self, config, variance_epsilon=1e-12):
+    def __init__(self, config, variance_epsilon=1e-12):
         super().__init__()
         self.gamma = nn.Parameter(torch.ones(config.dim))
         self.beta = nn.Parameter(torch.zeros(config.dim))
@@ -87,12 +86,12 @@ class MultiheadedSelfAttention(nn.Module):
         self.scores = scores
         return h
 
-class PositionWiseFeedForward(nn.Moudle):
+class PositionWiseFeedForward(nn.Module):
     "FeedForward Neural Networks for each position"
     def __init__(self, config):
         super().__init__()
         self.fc1 = nn.Linear(config.dim, config.dim_ff)
-        self.fc2 = nn.Linear(config.dimff, config.dim)
+        self.fc2 = nn.Linear(config.dim_ff, config.dim)
         
     def forward(sefl, x):
         # (B, S, D) -> (B, S, D_ff) -> (B, S ,D)
@@ -120,7 +119,7 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.embed = Embeddings(config)
-        self.blocks = nn.MoudleList([Block(config) for _ in range(config.n_layers)])
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layers)])
     
     def forward(self, x, seg, mask):
         h = self.embed(x, seg)
@@ -130,9 +129,10 @@ class Transformer(nn.Module):
 
 class BERTModel4Pretrain(nn.Module):
     def __init__(self, config):
+        super().__init__()
         self.config = config
         self.transformer = Transformer(self.config)
-        self.fc = nn.Linear(self.config.dim, self.config.cim)
+        self.fc = nn.Linear(self.config.dim, self.config.dim)
         self.activ1 = nn.Tanh()
         self.linear = nn.Linear(self.config.dim, self.config.dim)
         self.activ2 = gelu

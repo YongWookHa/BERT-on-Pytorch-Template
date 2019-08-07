@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.backends import cudnn
 from torch.autograd import Variable
+from tensorboardX import SummaryWriter
 
 from agents.base import BaseAgent
 from datasets.bert import BERTDataLoader
@@ -24,13 +25,13 @@ class BERTAgent(BaseAgent):
         self.global_step = 0
         self.best_valid_mean_iou = 0
 
-        self.dataloader = BERTDataLoader
-        self.model = BERTModel4Pretrain
+        self.dataloader = BERTDataLoader(self.config)
+        self.model = BERTModel4Pretrain(self.config)
         self.criterion1 = nn.CrossEntropyLoss(reduction='none')
         self.criterion2 = nn.CrossEntropyLoss()
 
         self.optimizer = optim4GPU(self.config, self.model)
-        self.writer = SummaryWriter(log_dir=log_dir)
+        self.writer = SummaryWriter(log_dir=self.config.log_dir)
 
     def load_checkpoint(self, file_name):
         """
@@ -88,14 +89,17 @@ class BERTAgent(BaseAgent):
         except KeyboardInterrupt:
             self.logger.info("You have entered CTRL+C.. Wait to finalize")
 
-    def train(self, model_file=None, pretrain_file=None):
+    def train(self):
         """
         Main training loop
         :return:
         """
         self.model.train()
-        self.load(model_file, pretrain_file)
-        self.model = self.model.to(self.config.gpu_device)
+        self.load_checkpoint(self.config.checkpoint_to_load)
+        if self.config.gpu_cpu == 'gpu':
+            self.model = self.model.to(self.config.gpu_device)
+        elif self.config.gpu_cpu == 'cpu':
+            self.model.cpu()
         if self.config.data_parallel: # use Data Parallelism with Multi-GPU
             self.model = nn.DataParallel(self.model)
 
@@ -116,7 +120,12 @@ class BERTAgent(BaseAgent):
 
         loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
         for i, batch in enumerate(iter_bar):
-            batch = [t.to(self.config.gpu_device) for t in batch]
+            if self.config.gpu_cpu == 'gpu':
+                batch = [t.to(self.config.gpu_device) for t in batch]
+            elif self.config.gpu_cpu == 'cpu':
+                batch = [t.cpu() for t in batch]
+            else:
+                raise NotImplementedError
 
             self.optimizer.zero_grad()
             loss = self.get_loss(batch).mean()
@@ -141,12 +150,12 @@ class BERTAgent(BaseAgent):
             
     
     def get_loss(self, batch): # make sure loss is tensor
-        input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next = batch
+        bert_input, segment_label, input_mask, bert_label, masked_pos, masked_weights, is_next = batch
 
-        logits_lm, logits_clsf = self.model(input_ids, segment_ids, input_mask, masked_pos)
-        loss_lm = criterion1(logits_lm.transpose(1, 2), masked_ids) # for masked LM
+        logits_lm, logits_clsf = self.model(bert_input, segment_label, input_mask, masked_pos)
+        loss_lm = self.criterion1(logits_lm.transpose(1, 2), bert_label) # for masked LM
         loss_lm = (loss_lm*masked_weights.float()).mean()
-        loss_clsf = criterion2(logits_clsf, is_next) # for sentence classification
+        loss_clsf = self.criterion2(logits_clsf, is_next) # for sentence classification
         self.writer.add_scalars('data/scalar_group',
                            {'loss_lm': loss_lm.item(),
                             'loss_clsf': loss_clsf.item(),

@@ -2,29 +2,24 @@ import numpy as numpy
 import sentencepiece as spm
 import random
 from tqdm import tqdm
+
 import torch
 
 from torch.utils.data import DataLoader, TensorDataset, Dataset
+from utils.tokenization import FullTokenizer
+from utils.misc import truncate_tokens_pair, get_random_word
 
 class SentencePairDataset(Dataset):
-    def __init__(self, config, mode):
+    def __init__(self, config, tokenizer, mode):
         "mode : ['train', 'validate']"
         self.config = config 
-        if self.config.tokenizer is 'bpe':
-            prefix = bpe_model
-            cmd = '--input={} --vocab_size={} --model_prefix={}'
-            cmd = cmd.format(self.config.data_dir, self.config.vocab_size, prefix)
-            try:
-                spm.SentencePieceTrainer.Train(cmd)
-                sp = spm.SenetencePieceProcesseor()
-                sp.Load('{}.model'.format(prefix))
-            except Exception:
-                raise
-            self.tokenize = sp.EncodeAsPieces  
-        elif self.config.tokenizer is None:  # split
-            self.tokenize = lambda x: x.split()
-        else:
-            raise NotImplementedError
+        self.max_len = self.config.max_len
+        self.max_pred = self.config.max_pred
+        self.mask_prob = self.config.mask_prob
+
+        self.indexer = tokenizer.convert_tokens_to_ids
+        self.tokenize = lambda x: tokenizer.tokenize(tokenizer.convert_to_unicode(x))
+        self.vocab = tokenizer.vocab
 
         train_data, validate_data = [], []
         self.total_lines = sum([1 for _ in open(self.config.data_dir, "r", encoding="utf8")])
@@ -47,50 +42,55 @@ class SentencePairDataset(Dataset):
         return len(self.lines)
     
     def __getitem__(self, idx):
-        t1, t2, is_next_label = self.random_sent(idx)
-        t1_random, t1_label = self.random_word(t1)  # mask random words
-        t2_random, t2_label = self.random_word(t2)  # mask random words
+        tokens_a, tokens_b, is_next = self.random_sent(idx)
 
-        # [CLS] tag = SOS tag, [SEP] tag = EOS tag
-        t1 = ['[CLS]'] + t1_random + ['[SEP]']
-        t2 = t2_random + ['[SEP]']
+        truncate_tokens_pair(tokens_a, tokens_b, self.max_len - 3)
 
-        t1_label = ['[CLS]'] + t1_label + ['[SEP]']
-        t2_label = t2_label + ['[SEP]']
+        # Add Special Tokens
+        tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
+        segment_ids = [1]*(len(tokens_a)+2) + [2]*(len(tokens_b)+1)
+        input_mask = [1]*len(tokens)
 
-        segment_label = [1]*(len(t1)+2) + [2]*(len(t2)+1)
-        bert_input = (t1 + t2)[:self.max_len]
-        bert_label = (t1_label + t2_label)[:self.max_len]
+        # For masked Language Models
+        masked_tokens, masked_pos = [], []
+        # the number of prediction is sometimes less than max_pred when sequence is short
+        n_pred = min(self.max_pred, max(1, int(round(len(tokens)*self.mask_prob))))
+        # candidate positions of masked tokens
+        cand_pos = [i for i, token in enumerate(tokens)
+                    if token != '[CLS]' and token != '[SEP]']
+        shuffle(cand_pos)
+        for pos in cand_pos[:n_pred]:
+            masked_tokens.append(tokens[pos])
+            masked_pos.append(pos)
+            if rand() < 0.8: # 80%
+                tokens[pos] = '[MASK]'
+            elif rand() < 0.5: # 10%
+                tokens[pos] = get_random_word(self.vocab)
+        # when n_pred < max_pred, we only calculate loss within n_pred
+        masked_weights = [1]*len(masked_tokens)
 
-        padding = ['[PAD]']*(self.max_len - len(bert_input))
-        bert_input.extend(padding), bert_label.extend(padding), segment_label.extend(padding)
+        # Token Indexing
+        input_ids = self.indexer(tokens)
+        masked_ids = self.indexer(masked_tokens)
 
-        output = {"bert_input": bert_input,
-                  "bert_label": bert_label,
-                  "segment_label": segment_label,
-                  "is_next": is_next_label}
+        # Zero Padding
+        n_pad = self.max_len - len(input_ids)
+        input_ids.extend([0]*n_pad)
+        segment_ids.extend([0]*n_pad)
+        input_mask.extend([0]*n_pad)
 
-        return {key: torch.tensor(value) for key, value in output.items()}
+        # Zero Padding for masked target
+        if self.max_pred > n_pred:
+            n_pad = self.max_pred - n_pred
+            masked_ids.extend([0]*n_pad)
+            masked_pos.extend([0]*n_pad)
+            masked_weights.extend([0]*n_pad)
+
+        return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
+
+
 
     
-    def random_word(self, sentence):
-        tokens = sentence.split()
-        output_label = []
-
-        for i, token in enumerate(tokens):
-            prob = random.random()
-            if prob < 0.15:
-                prob /= 0.15
-
-                if prob < 0.8:  # 80% randomly change token to mask token
-                    tokens[i] = "[MASK]"
-                elif prob < 0.9:  # 10% randomly change token to random token
-                    tokens[i] = random.choice(random.choice(self.lines)[random.randint(0,1)])
-                else:  # 10% randomly change token to current token
-                    pass
-
-            output_label.append(token)
-        return tokens, output_label
 
     def random_sent(self, idx):
         t1, t2 = self.get_corpus_line(idx)
@@ -111,10 +111,11 @@ class SentencePairDataset(Dataset):
 class BERTDataLoader:
     def __init__(self, config):
         self.config = config
+        tokenizer = FullTokenizer(self.config, do_lower_case=True) 
 
         if self.config.mode == "pretrain":
-            train_dataset = SentencePairDataset(self.config, 'train')
-            validate_dataset = SentencePairDataset(self.config, 'validate')
+            train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
+            validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
 
             self.train_dataset_len = len(train_dataset)
             self.validate_dataset_len = len(validate_dataset)
