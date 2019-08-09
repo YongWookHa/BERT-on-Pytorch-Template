@@ -34,7 +34,8 @@ class SentencePairDataset(Dataset):
             else:
                 raise ValueError("Invalid Mode: '{}'".format(mode))
 
-            for i in range(len(self.lines)):
+            iter_bar = tqdm(range(len(self.lines)), desc="{} data".format(mode))
+            for i in iter_bar:
                 self.lines[i] = list(map(self.tokenize, self.lines[i].split('\t')[:2]))
 
     def __len__(self):
@@ -86,7 +87,9 @@ class SentencePairDataset(Dataset):
             masked_pos.extend([0]*n_pad)
             masked_weights.extend([0]*n_pad)
 
-        return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
+        batch = (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
+        batch_tensors = [torch.tesnor(x, dtype=torch.long) for x in zip(*batch)]
+        return batch_tensors
 
 
 
