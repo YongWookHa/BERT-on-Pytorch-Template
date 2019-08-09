@@ -1,5 +1,8 @@
 import time
 import logging
+import random
+import numpy as np
+import torch
 
 
 def timeit(f):
@@ -47,4 +50,11 @@ def truncate_tokens_pair(tokens_a, tokens_b, max_len):
 
 def get_random_word(vocab_words):
     i = random.randint(0, len(vocab_words)-1)
-    return vocab_words[i]
+    return list(vocab_words.keys())[i]
+
+def set_seeds(seed):
+    "set random seeds"
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)

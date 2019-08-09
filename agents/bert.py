@@ -7,31 +7,53 @@ import torch
 from torch import nn
 from torch.backends import cudnn
 from torch.autograd import Variable
+from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 from agents.base import BaseAgent
-from datasets.bert import BERTDataLoader
+from datasets.bert import SentencePairDataset
 from graphs.models.bert import BERTModel4Pretrain
 from utils.optim import optim4GPU
-
+from utils.tokenization import FullTokenizer
+from utils.misc import set_seeds
+''
 cudnn.benchmark = True
+
 
 class BERTAgent(BaseAgent):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-
+        set_seeds(self.config.seed)
         self.current_epoch = 0
         self.global_step = 0
         self.best_valid_mean_iou = 0
 
-        self.dataloader = BERTDataLoader(self.config)
         self.model = BERTModel4Pretrain(self.config)
         self.criterion1 = nn.CrossEntropyLoss(reduction='none')
         self.criterion2 = nn.CrossEntropyLoss()
 
         self.optimizer = optim4GPU(self.config, self.model)
         self.writer = SummaryWriter(log_dir=self.config.log_dir)
+
+        tokenizer = FullTokenizer(self.config, do_lower_case=True)
+        tokenizer.vocab
+        train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
+        test_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
+
+        
+        a = train_dataset.__getitem__(0)
+
+        self.train_dataloader = DataLoader(train_dataset,
+                                            batch_size = self.config.batch_size,
+                                            num_workers = self.config.data_loader_workers,
+                                            pin_memory = self.config.pin_memory
+                                            )
+
+        self.test_dataloader = DataLoader(test_dataset,
+                                            batch_size = self.config.batch_size,
+                                            num_workers = self.config.data_loader_workers,
+                                            pin_memory = self.config.pin_memory)                                            
 
     def load_checkpoint(self, file_name):
         """
@@ -114,12 +136,12 @@ class BERTAgent(BaseAgent):
         One epoch of training
         :return:
         """
-        iter_bar = tqdm(self.dataloader.train_dataloader, 
-                    total=self.dataloader.train_dataset_len,
+
+        iter_bar = tqdm(enumerate(self.train_dataloader), 
                     desc="Iter (loss=X.XXX)")
 
         loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
-        for i, batch in enumerate(iter_bar):
+        for i, batch in iter_bar:
             if self.config.gpu_cpu == 'gpu':
                 batch = [t.to(self.config.gpu_device) for t in batch]
             elif self.config.gpu_cpu == 'cpu':

@@ -37,7 +37,7 @@ class Embeddings(nn.Module):
     "The embedding module from word, position and token_type embeddings."
     def __init__(self, config):
         super().__init__()
-        self.tok_embed = nn.Embedding(config.vocab_size, config.dim)
+        self.tok_embed = nn.Embedding(config.vocab_size+3, config.dim)
         self.pos_embed = nn.Embedding(config.max_len, config.dim)
         self.seg_embed = nn.Embedding(config.n_segments + 1, config.dim)
 
@@ -76,11 +76,11 @@ class MultiheadedSelfAttention(nn.Module):
         # (B, H, S, W) @ (B, H, W, S) -> (B, H, S, S) -softmax-> (B, H, S, S)
         scores = q @ k.transpose(-2, -1) / np.sqrt(k.size(-1))
         if mask is not None:
-            mask = mask[:, None, None, :].flaot()
+            mask = mask[:, None, None, :].float()
             scores -= 10000.0 * (1.0 - mask)
         scores = self.drop(F.softmax(scores, dim=-1))
         # (B, H, S, S) @ (B, H, S, W) - > (B, H, S, W) -trans -> (B, S, H, W)
-        h = (scores @ V).transpose(1, 2).contiguous()
+        h = (scores @ v).transpose(1, 2).contiguous()
         # -merge-> (B, S, D)
         h = merge_last(h, 2)
         self.scores = scores

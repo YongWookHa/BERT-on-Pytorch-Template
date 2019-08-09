@@ -59,13 +59,13 @@ class SentencePairDataset(Dataset):
         # candidate positions of masked tokens
         cand_pos = [i for i, token in enumerate(tokens)
                     if token != '[CLS]' and token != '[SEP]']
-        shuffle(cand_pos)
+        random.shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             masked_tokens.append(tokens[pos])
             masked_pos.append(pos)
-            if rand() < 0.8: # 80%
+            if random.random() < 0.8: # 80%
                 tokens[pos] = '[MASK]'
-            elif rand() < 0.5: # 10%
+            elif random.random() < 0.5: # 10%
                 tokens[pos] = get_random_word(self.vocab)
         # when n_pred < max_pred, we only calculate loss within n_pred
         masked_weights = [1]*len(masked_tokens)
@@ -88,12 +88,8 @@ class SentencePairDataset(Dataset):
             masked_weights.extend([0]*n_pad)
 
         batch = (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
-        batch_tensors = [torch.tesnor(x, dtype=torch.long) for x in zip(*batch)]
+        batch_tensors = [torch.tensor(x, dtype=torch.long) for x in batch]
         return batch_tensors
-
-
-
-    
 
     def random_sent(self, idx):
         t1, t2 = self.get_corpus_line(idx)
@@ -104,38 +100,10 @@ class SentencePairDataset(Dataset):
         else:
             return t1, self.get_random_line(), 0
 
-    def get_corpus_line(self):
+    def get_corpus_line(self, idx):
         return self.lines[idx][0], self.lines[idx][1]
 
-    def get_random_line(self, ):
+    def get_random_line(self):
         return random.choice(self.lines)[1]
-    
-
-class BERTDataLoader:
-    def __init__(self, config):
-        self.config = config
-        tokenizer = FullTokenizer(self.config, do_lower_case=True) 
-
-        if self.config.mode == "pretrain":
-            train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
-            validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
-
-            self.train_dataset_len = len(train_dataset)
-            self.validate_dataset_len = len(validate_dataset)
-
-            self.train_dataloader = DataLoader(train_dataset,
-                                        batch_size = self.config.batch_size,
-                                        num_workers = self.config.data_loader_workers,
-                                        pin_memory = self.config.pin_memory)
-
-            self.validate_dataloader = DataLoader(validate_dataset,
-                                        batch_size = self.config.batch_size,
-                                        num_workers = self.config.data_loader_workers,
-                                        pin_memory = self.config.pin_memory)
-
-
-
-            
-            
 
 
