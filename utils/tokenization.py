@@ -204,7 +204,7 @@ class BytePairEncodingTokenizer(object):
     def __init__(self, config):
         prefix = os.path.join('experiments', config.exp_name, 'bpe')
         cmd = '--input={} --vocab_size={} --model_prefix={}'
-        cmd = cmd.format(config.data_dir, config.vocab_size, prefix)
+        cmd = cmd.format(config.data_path, config.vocab_size, prefix)
         try:
             if not os.path.exists(prefix+'.model'):
                 spm.SentencePieceTrainer.Train(cmd)

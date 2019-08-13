@@ -22,15 +22,15 @@ class SentencePairDataset(Dataset):
         self.vocab = tokenizer.vocab
 
         train_data, validate_data = [], []
-        self.total_lines = sum([1 for _ in open(self.config.data_dir, "r", encoding="utf8")])
-        with open(self.config.data_dir, "r", encoding="utf-8", errors="ignore") as f:
+        self.total_lines = sum([1 for _ in open(self.config.data_path, "r", encoding="utf8")])
+        with open(self.config.data_path, "r", encoding="utf-8", errors="ignore") as f:
             self.lines = f.readlines()  # load all on memory         
             num_train_data = int(self.config.train_data_ratio * self.total_lines)
             
             if mode == 'train':
                 self.lines = self.lines[:num_train_data]
             elif mode == 'validate':
-                self.lines = self.lines[num_train_data:]
+                self.lines = self.lines[num_train_data:-1]
             else:
                 raise ValueError("Invalid Mode: '{}'".format(mode))
 

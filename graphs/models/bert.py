@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
+import math
 import json
 from easydict import EasyDict as edict
 from utils.tensor import split_last, merge_last
@@ -151,7 +151,7 @@ class BERTModel4Pretrain(nn.Module):
         masked_pos = masked_pos[:, :, None].expand(-1, -1, h.size(-1))
         h_masked = torch.gather(h, 1, masked_pos)
         h_masked = self.norm(self.activ2(self.linear(h_masked)))
-        logits_lm = self.decoder(h_masekd) + self.decoder_bias
+        logits_lm = self.decoder(h_masked) + self.decoder_bias
         logits_clsf = self.classifier(pooled_h)
 
         return logits_lm, logits_clsf

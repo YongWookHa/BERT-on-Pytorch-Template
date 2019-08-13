@@ -15,8 +15,8 @@ from datasets.bert import SentencePairDataset
 from graphs.models.bert import BERTModel4Pretrain
 from utils.optim import optim4GPU
 from utils.tokenization import FullTokenizer
-from utils.misc import set_seeds
-''
+from utils.misc import set_seeds, get_device
+
 cudnn.benchmark = True
 
 
@@ -24,12 +24,15 @@ class BERTAgent(BaseAgent):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
+        self.device = get_device()
+
         set_seeds(self.config.seed)
-        self.current_epoch = 0
+        self.current_epoch = 1
         self.global_step = 0
         self.best_valid_mean_iou = 0
 
         self.model = BERTModel4Pretrain(self.config)
+
         self.criterion1 = nn.CrossEntropyLoss(reduction='none')
         self.criterion2 = nn.CrossEntropyLoss()
 
@@ -37,9 +40,8 @@ class BERTAgent(BaseAgent):
         self.writer = SummaryWriter(log_dir=self.config.log_dir)
 
         tokenizer = FullTokenizer(self.config, do_lower_case=True)
-        tokenizer.vocab
         train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
-        test_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
+        validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
 
         
         a = train_dataset.__getitem__(0)
@@ -50,7 +52,7 @@ class BERTAgent(BaseAgent):
                                             pin_memory = self.config.pin_memory
                                             )
 
-        self.test_dataloader = DataLoader(test_dataset,
+        self.validate_dataloader = DataLoader(validate_dataset,
                                             batch_size = self.config.batch_size,
                                             num_workers = self.config.data_loader_workers,
                                             pin_memory = self.config.pin_memory)                                            
@@ -75,7 +77,7 @@ class BERTAgent(BaseAgent):
                   .format(self.config.checkpoint_dir, checkpoint['epoch'], checkpoint['iteration']))
         
         except OSError as e:
-            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.config.checkpoint_dir))
+            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(filename))
             self.logger.info("**First time to train**")
         
 
@@ -108,6 +110,7 @@ class BERTAgent(BaseAgent):
         """
         try:
             self.train()
+            self.validate()
         except KeyboardInterrupt:
             self.logger.info("You have entered CTRL+C.. Wait to finalize")
 
@@ -117,40 +120,32 @@ class BERTAgent(BaseAgent):
         :return:
         """
         self.model.train()
-        self.load_checkpoint(self.config.checkpoint_to_load)
-        if self.config.gpu_cpu == 'gpu':
-            self.model = self.model.to(self.config.gpu_device)
-        elif self.config.gpu_cpu == 'cpu':
-            self.model.cpu()
-        if self.config.data_parallel: # use Data Parallelism with Multi-GPU
+        self.model = self.model.to(self.device)
+        if self.config.data_parallel:
             self.model = nn.DataParallel(self.model)
 
+        self.load_checkpoint(self.config.checkpoint_to_load)
+
         self.global_step = 0
-        for epoch in range(self.current_epoch, self.config.max_epoch):
+        for epoch in range(self.current_epoch, self.config.n_epochs+1):
             self.current_epoch = epoch
             self.train_one_epoch()
-            self.save_checkpoint(file_name="bert_checkpoint_epoch_{}.tar".format(epoch))
+            self.save_checkpoint(file_name="bert_checkpoint_epoch_{}.tar".format(epoch+1))
 
     def train_one_epoch(self):
         """
         One epoch of training
         :return:
         """
-
-        iter_bar = tqdm(enumerate(self.train_dataloader), 
-                    desc="Iter (loss=X.XXX)")
+        iter_bar = tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader), desc="Iter (loss=X.XXX)")
 
         loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
         for i, batch in iter_bar:
-            if self.config.gpu_cpu == 'gpu':
-                batch = [t.to(self.config.gpu_device) for t in batch]
-            elif self.config.gpu_cpu == 'cpu':
-                batch = [t.cpu() for t in batch]
-            else:
-                raise NotImplementedError
+            batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            loss = self.get_loss(batch).mean()
+            loss_lm, loss_clsf = self.get_loss(batch)
+            loss = (loss_lm + loss_clsf).mean()
             loss.backward()
             self.optimizer.step()
 
@@ -162,13 +157,13 @@ class BERTAgent(BaseAgent):
                 self.save_checkpoint(file_name="bert_checkpoint_global_step_{}.tar".format(self.global_step))
 
             if self.config.total_steps and self.config.total_steps < self.global_step:
-                print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.config.n_epochs, loss_sum/(i+1)))
+                print('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1)))
                 print('The Total Steps have been reached.')
                 # save and finish when global_steps reach total_steps
                 self.save_checkpoint(file_name="bert_checkpoint_global_step_{}.tar".format(self.global_step)) 
                 return
-
-        print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.config.n_epochs, loss_sum/(i+1)))
+        self.logger.info('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1))) 
+        print('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1)))
             
     
     def get_loss(self, batch): # make sure loss is tensor
@@ -178,28 +173,46 @@ class BERTAgent(BaseAgent):
         loss_lm = self.criterion1(logits_lm.transpose(1, 2), bert_label) # for masked LM
         loss_lm = (loss_lm*masked_weights.float()).mean()
         loss_clsf = self.criterion2(logits_clsf, is_next) # for sentence classification
-        self.writer.add_scalars('data/scalar_group',
+        self.writer.add_scalars('scalar_group',
                            {'loss_lm': loss_lm.item(),
                             'loss_clsf': loss_clsf.item(),
                             'loss_total': (loss_lm + loss_clsf).item(),
-                            'lr': optimizer.get_lr()[0],
+                            'lr': self.optimizer.get_lr()[0],
                            },
                            self.global_step)
-        return loss_lm + loss_clsf
+        return loss_lm, loss_clsf
 
-    def validate(self, m):
+    def validate(self):
         """
         One cycle of model validation
         :return:
         """
         self.model.eval()
-        self.load(model_file, None)
+        if self.config.mode == "validate":
+            self.model = self.model.to(self.device)
+            if self.config.data_parallel:
+                self.model = nn.DataParallel(self.model)
 
-        raise NotImplementedError
+        iter_bar = tqdm(enumerate(self.validate_dataloader), total=len(self.validate_dataloader), desc="Loss (LM=X.XXX / NSP=X.XXX)")
+        loss_sum = 0
+        for i, batch in iter_bar:
+            batch = [t.to(self.device) for t in batch]
+
+            loss_lm, loss_clsf = self.get_loss(batch)
+            loss = loss_lm + loss_clsf
+
+            loss_sum += loss.item()
+            iter_bar.set_description('Loss (LM=%5.3f / NSP=%5.3f)'%(loss_lm, loss_clsf))
+
+        self.logger.info('Validate : Average Loss %5.3f'%(loss_sum/(i+1))) 
+        print('Validate : Average Loss %5.3f'%(loss_sum/(i+1)))
 
     def finalize(self):
         """
         Finalizes all the operations of the 2 Main classes of the process, the operator and the data loader
         :return:
         """
-        raise NotImplementedError
+        print("\nModel finished running.")
+        print("  Current epochs : {}".format(self.current_epoch))
+        print("  Global steps : {}".format(self.global_step))
+        print("  Summary Written at : {}".format(self.config.log_dir+'summaries'))
