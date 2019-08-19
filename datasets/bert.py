@@ -1,6 +1,7 @@
 import numpy as numpy
 import sentencepiece as spm
 import random
+import pandas as pd
 from tqdm import tqdm
 
 import torch
@@ -9,7 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset, Dataset
 from utils.tokenization import FullTokenizer
 from utils.misc import truncate_tokens_pair, get_random_word
 
-class SentencePairDataset(Dataset):
+class SentencePairDataset(Dataset):  # msr_paraphrase dataset
     def __init__(self, config, tokenizer, mode):
         "mode : ['train', 'validate']"
         self.config = config 
@@ -59,6 +60,7 @@ class SentencePairDataset(Dataset):
         # candidate positions of masked tokens
         cand_pos = [i for i, token in enumerate(tokens)
                     if token != '[CLS]' and token != '[SEP]']
+
         random.shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             masked_tokens.append(tokens[pos])
@@ -88,6 +90,7 @@ class SentencePairDataset(Dataset):
             masked_weights.extend([0]*n_pad)
 
         batch = (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
+        
         batch_tensors = [torch.tensor(x, dtype=torch.long) for x in batch]
         return batch_tensors
 
