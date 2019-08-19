@@ -55,7 +55,12 @@ class BERTAgent(BaseAgent):
         self.validate_dataloader = DataLoader(validate_dataset,
                                             batch_size = self.config.batch_size,
                                             num_workers = self.config.data_loader_workers,
-                                            pin_memory = self.config.pin_memory)                                            
+                                            pin_memory = self.config.pin_memory)       
+                        
+        self.model = self.model.to(self.device)
+        if self.config.data_parallel:
+            self.model = nn.DataParallel(self.model)
+        self.load_checkpoint(self.config.checkpoint_to_load)
 
     def load_checkpoint(self, file_name):
         """
@@ -109,8 +114,11 @@ class BERTAgent(BaseAgent):
         :return:
         """
         try:
-            self.train()
-            self.validate()
+            if self.config.mode == "validate_only":
+                self.validate()
+            else:
+                self.train()
+                self.validate()
         except KeyboardInterrupt:
             self.logger.info("You have entered CTRL+C.. Wait to finalize")
 
@@ -120,17 +128,11 @@ class BERTAgent(BaseAgent):
         :return:
         """
         self.model.train()
-        self.model = self.model.to(self.device)
-        if self.config.data_parallel:
-            self.model = nn.DataParallel(self.model)
-
-        self.load_checkpoint(self.config.checkpoint_to_load)
-
         self.global_step = 0
         for epoch in range(self.current_epoch, self.config.n_epochs+1):
             self.current_epoch = epoch
             self.train_one_epoch()
-            self.save_checkpoint(file_name="bert_checkpoint_epoch_{}.tar".format(epoch+1))
+            # self.save_checkpoint(file_name="bert_checkpoint_epoch_{}.tar".format(epoch))
 
     def train_one_epoch(self):
         """
@@ -140,39 +142,41 @@ class BERTAgent(BaseAgent):
         iter_bar = tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader), desc="Iter (loss=X.XXX)")
 
         loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
+        acc_sum = 0.
         for i, batch in iter_bar:
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            loss_lm, loss_clsf = self.get_loss(batch)
-            loss = (loss_lm + loss_clsf).mean()
+            loss, correct = self.get_loss(batch)
+            loss = loss.mean()  # mean() for Data Parallelism
+            acc = correct/self.config.batch_size
             loss.backward()
             self.optimizer.step()
 
             self.global_step += 1
             loss_sum += loss.item()
-            iter_bar.set_description('Iter (loss=%5.3f)'%loss.item())
+            acc_sum += acc
+            iter_bar.set_description('Iter (loss=%5.3f / NSP_acc=%5.3f)' % (loss.item(), acc))
 
             if self.global_step % self.config.save_steps == 0: # save
                 self.save_checkpoint(file_name="bert_checkpoint_global_step_{}.tar".format(self.global_step))
 
             if self.config.total_steps and self.config.total_steps < self.global_step:
-                print('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1)))
+                print('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch, self.config.n_epochs, loss_sum/(i+1)))
                 print('The Total Steps have been reached.')
                 # save and finish when global_steps reach total_steps
                 self.save_checkpoint(file_name="bert_checkpoint_global_step_{}.tar".format(self.global_step)) 
                 return
-        self.logger.info('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1))) 
-        print('Epoch %d/%d : Average Loss %5.3f'%(self.current_epoch+1, self.config.n_epochs, loss_sum/(i+1)))
-            
-    
-    def get_loss(self, batch): # make sure loss is tensor
+        self.logger.info('Epoch %d/%d : Average Loss %5.3f / NSP acc: %5.3f'%(self.current_epoch, self.config.n_epochs, loss_sum/(i+1), acc_sum/(i+1))) 
+
+    def get_loss(self, batch) -> torch.tensor :
         bert_input, segment_label, input_mask, bert_label, masked_pos, masked_weights, is_next = batch
 
         logits_lm, logits_clsf = self.model(bert_input, segment_label, input_mask, masked_pos)
         loss_lm = self.criterion1(logits_lm.transpose(1, 2), bert_label) # for masked LM
         loss_lm = (loss_lm*masked_weights.float()).mean()
         loss_clsf = self.criterion2(logits_clsf, is_next) # for sentence classification
+        correct = logits_clsf.argmax(dim=-1).eq(is_next).sum().item() 
         self.writer.add_scalars('scalar_group',
                            {'loss_lm': loss_lm.item(),
                             'loss_clsf': loss_clsf.item(),
@@ -180,7 +184,7 @@ class BERTAgent(BaseAgent):
                             'lr': self.optimizer.get_lr()[0],
                            },
                            self.global_step)
-        return loss_lm, loss_clsf
+        return loss_lm + loss_clsf, correct
 
     def validate(self):
         """
@@ -188,24 +192,22 @@ class BERTAgent(BaseAgent):
         :return:
         """
         self.model.eval()
-        if self.config.mode == "validate":
-            self.model = self.model.to(self.device)
-            if self.config.data_parallel:
-                self.model = nn.DataParallel(self.model)
 
-        iter_bar = tqdm(enumerate(self.validate_dataloader), total=len(self.validate_dataloader), desc="Loss (LM=X.XXX / NSP=X.XXX)")
+        iter_bar = tqdm(enumerate(self.validate_dataloader), total=len(self.validate_dataloader), desc="Loss=X.XXX / NSP acc=X.XXX")
         loss_sum = 0
+        acc_sum = 0
         for i, batch in iter_bar:
             batch = [t.to(self.device) for t in batch]
 
-            loss_lm, loss_clsf = self.get_loss(batch)
-            loss = loss_lm + loss_clsf
-
+            loss, correct = self.get_loss(batch)
+            loss = loss.mean()
+            acc = correct/self.config.batch_size
             loss_sum += loss.item()
-            iter_bar.set_description('Loss (LM=%5.3f / NSP=%5.3f)'%(loss_lm, loss_clsf))
+            acc_sum += acc
+            iter_bar.set_description('Loss=%5.3f / NSP acc=%5.3f'%(loss, acc))
 
-        self.logger.info('Validate : Average Loss %5.3f'%(loss_sum/(i+1))) 
-        print('Validate : Average Loss %5.3f'%(loss_sum/(i+1)))
+        self.logger.info('Validate; Average Loss: %5.3f / NSP Average Accuracy: %5.3f'%(loss_sum/(i+1), acc_sum/(i+1)))
+
 
     def finalize(self):
         """
@@ -213,6 +215,7 @@ class BERTAgent(BaseAgent):
         :return:
         """
         print("\nModel finished running.")
+        print("  Running mode : {}".format(self.config.mode))
         print("  Current epochs : {}".format(self.current_epoch))
         print("  Global steps : {}".format(self.global_step))
-        print("  Summary Written at : {}".format(self.config.log_dir+'summaries'))
+        print("  Summary Written at : {}".format(self.config.log_dir))
