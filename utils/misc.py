@@ -24,7 +24,6 @@ def print_cuda_statistics():
     logger = logging.getLogger("Cuda Statistics")
     import sys
     from subprocess import call
-    import torch
     logger.info('__Python VERSION:  {}'.format(sys.version))
     logger.info('__pyTorch VERSION:  {}'.format(torch.__version__))
     logger.info('__CUDA VERSION')
@@ -48,9 +47,11 @@ def truncate_tokens_pair(tokens_a, tokens_b, max_len):
         else:
             tokens_b.pop()
 
+
 def get_random_word(vocab_words):
     i = random.randint(0, len(vocab_words)-1)
     return list(vocab_words.keys())[i]
+
 
 def set_seeds(seed):
     "set random seeds"
