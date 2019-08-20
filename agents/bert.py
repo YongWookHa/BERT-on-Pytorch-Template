@@ -131,7 +131,9 @@ class BERTAgent(BaseAgent):
         self.global_step = 0
         for epoch in range(self.current_epoch, self.config.n_epochs+1):
             self.current_epoch = epoch
-            self.train_one_epoch()
+            if self.train_one_epoch() == -1:
+                break
+            
             # self.save_checkpoint(file_name="bert_checkpoint_epoch_{}.tar".format(epoch))
 
     def train_one_epoch(self):
@@ -147,9 +149,8 @@ class BERTAgent(BaseAgent):
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            loss, correct = self.get_loss(batch)
+            loss, acc = self.get_loss(batch)
             loss = loss.mean()  # mean() for Data Parallelism
-            acc = correct/self.config.batch_size
             loss.backward()
             self.optimizer.step()
 
@@ -166,7 +167,7 @@ class BERTAgent(BaseAgent):
                 print('The Total Steps have been reached.')
                 # save and finish when global_steps reach total_steps
                 self.save_checkpoint(file_name="bert_checkpoint_global_step_{}.tar".format(self.global_step)) 
-                return
+                return -1
         self.logger.info('Epoch %d/%d : Average Loss %5.3f / NSP acc: %5.3f'%(self.current_epoch, self.config.n_epochs, loss_sum/(i+1), acc_sum/(i+1))) 
 
     def get_loss(self, batch) -> torch.tensor :
@@ -177,14 +178,16 @@ class BERTAgent(BaseAgent):
         loss_lm = (loss_lm*masked_weights.float()).mean()
         loss_clsf = self.criterion2(logits_clsf, is_next) # for sentence classification
         correct = logits_clsf.argmax(dim=-1).eq(is_next).sum().item() 
+        accuracy = correct / self.config.batch_size
         self.writer.add_scalars('scalar_group',
                            {'loss_lm': loss_lm.item(),
                             'loss_clsf': loss_clsf.item(),
                             'loss_total': (loss_lm + loss_clsf).item(),
+                            'accuracy' : accuracy,
                             'lr': self.optimizer.get_lr()[0],
                            },
                            self.global_step)
-        return loss_lm + loss_clsf, correct
+        return loss_lm + loss_clsf, accuracy
 
     def validate(self):
         """
@@ -199,9 +202,8 @@ class BERTAgent(BaseAgent):
         for i, batch in iter_bar:
             batch = [t.to(self.device) for t in batch]
 
-            loss, correct = self.get_loss(batch)
+            loss, acc = self.get_loss(batch)
             loss = loss.mean()
-            acc = correct/self.config.batch_size
             loss_sum += loss.item()
             acc_sum += acc
             iter_bar.set_description('Loss=%5.3f / NSP acc=%5.3f'%(loss, acc))
