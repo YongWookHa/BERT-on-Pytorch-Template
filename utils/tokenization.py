@@ -1,6 +1,6 @@
 # Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
 
-""" Tokenization classes (It's exactly the same code as Google BERT code """
+""" The code is a little bit changed from Google BERT code """
 
 from __future__ import absolute_import
 from __future__ import division
