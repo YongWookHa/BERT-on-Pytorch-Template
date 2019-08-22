@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 from agents.base import BaseAgent
-from datasets.bert import SentencePairDataset
-from graphs.models.bert import BERTModel4Pretrain
+from datasets.bert import SentencePairDataset, MSRPDataset
+from graphs.models.bert import BERTLM
 from utils.optim import optim4GPU
 from utils.tokenization import FullTokenizer
 from utils.misc import set_seeds, get_device
@@ -31,20 +31,25 @@ class BERTAgent(BaseAgent):
         self.global_step = 0
         self.best_valid_mean_iou = 0
 
-        self.model = BERTModel4Pretrain(self.config)
+        self.model = BERTLM(self.config)
 
-        self.criterion1 = nn.CrossEntropyLoss(reduction='none')
-        self.criterion2 = nn.CrossEntropyLoss()
+        self.criterion = nn.NLLLoss(ignore_index=0)
 
         self.optimizer = optim4GPU(self.config, self.model)
         self.writer = SummaryWriter(log_dir=self.config.log_dir)
 
         tokenizer = FullTokenizer(self.config, do_lower_case=True)
-        train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
-        validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
 
-        
-        a = train_dataset.__getitem__(0)
+        if self.config.dataset == "MSRP":
+            train_dataset = MSRPDataset(self.config, tokenizer, 'train')
+            validate_dataset = MSRPDataset(self.config, tokenizer, 'validate')
+            self.logger.info("Start MSRP dataset loading")
+        elif self.config.dataset == "SentencePair":
+            train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
+            validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
+            self.logger.info("Start SentencePair dataset loading")
+        else:
+            raise ValueError("Invalid self.config.dataset ({})".format(self.config.dataset))
 
         self.train_dataloader = DataLoader(train_dataset,
                                             batch_size = self.config.batch_size,
@@ -171,23 +176,29 @@ class BERTAgent(BaseAgent):
         self.logger.info('Epoch %d/%d : Average Loss %5.3f / NSP acc: %5.3f'%(self.current_epoch, self.config.n_epochs, loss_sum/(i+1), acc_sum/(i+1))) 
 
     def get_loss(self, batch) -> torch.tensor :
-        bert_input, segment_label, input_mask, bert_label, masked_pos, masked_weights, is_next = batch
+        bert_input, segment_label, bert_label, masked_weights, is_next = batch
+        # input_mask, masked_pos
+        next_sent_output, mask_lm_output = self.model(bert_input, segment_label)
 
-        logits_lm, logits_clsf = self.model(bert_input, segment_label, input_mask, masked_pos)
-        loss_lm = self.criterion1(logits_lm.transpose(1, 2), bert_label) # for masked LM
-        loss_lm = (loss_lm*masked_weights.float()).mean()
-        loss_clsf = self.criterion2(logits_clsf, is_next) # for sentence classification
-        correct = logits_clsf.argmax(dim=-1).eq(is_next).sum().item() 
+        next_loss = self.criterion(next_sent_output, is_next)
+
+        mask_loss = self.criterion(mask_lm_output.transpose(1, 2), bert_label)
+        mask_loss = (mask_loss*masked_weights.float()).mean()
+        
+        loss = next_loss + mask_loss
+
+        correct = next_sent_output.argmax(dim=-1).eq(is_next).sum().item()
         accuracy = correct / self.config.batch_size
+
         self.writer.add_scalars('scalar_group',
-                           {'loss_lm': loss_lm.item(),
-                            'loss_clsf': loss_clsf.item(),
-                            'loss_total': (loss_lm + loss_clsf).item(),
+                           {'Mask_Loss': mask_loss.item(),
+                            'NSP_Loss': next_loss.item(),
+                            'loss_total': loss.item(),
                             'accuracy' : accuracy,
                             'lr': self.optimizer.get_lr()[0],
                            },
                            self.global_step)
-        return loss_lm + loss_clsf, accuracy
+        return loss, accuracy
 
     def validate(self):
         """

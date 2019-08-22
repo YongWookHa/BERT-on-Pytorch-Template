@@ -8,13 +8,6 @@ import json
 from easydict import EasyDict as edict
 from utils.tensor import split_last, merge_last
 
-class BertModel4Pretrain(nn.Module):
-    "Bert Model for Pretrain : Masked LM and next sentence classification"
-    def __init__(self, config):
-        super().__init__()
-        self.transformer = models.Transformer(config)
-        self.fc = nn.Linear(config.dim, config.dim)
-
 def gelu(x):
     "Implementation of the gelu activation fucntion by Hugging Face"
     return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
@@ -76,7 +69,7 @@ class MultiheadedSelfAttention(nn.Module):
         # (B, H, S, W) @ (B, H, W, S) -> (B, H, S, S) -softmax-> (B, H, S, S)
         scores = q @ k.transpose(-2, -1) / np.sqrt(k.size(-1))
         if mask is not None:
-            mask = mask[:, None, None, :].float()
+            mask = mask.float()
             scores -= 10000.0 * (1.0 - mask)
         scores = self.drop(F.softmax(scores, dim=-1))
         # (B, H, S, S) @ (B, H, S, W) - > (B, H, S, W) -trans -> (B, S, H, W)
@@ -97,7 +90,7 @@ class PositionWiseFeedForward(nn.Module):
         # (B, S, D) -> (B, S, D_ff) -> (B, S ,D)
         return self.fc2(gelu(self.fc1(x)))
 
-class Block(nn.Module):
+class TransformerBlock(nn.Module):
     "Transformer Block"
     def __init__(self, config):
         super().__init__()
@@ -114,44 +107,79 @@ class Block(nn.Module):
         h = self.norm2(h + self.drop(self.proj(h)))
         return h
 
-class Transformer(nn.Module):
-    "Transformer with Self-Attentive Blocks"
-    def __init__(self, config):
-        super().__init__()
-        self.embed = Embeddings(config)
-        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layers)])
-    
-    def forward(self, x, seg, mask):
-        h = self.embed(x, seg)
-        for block in self.blocks:
-            h = block(h, mask)
-        return h
-
-class BERTModel4Pretrain(nn.Module):
+class BERT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.transformer = Transformer(self.config)
-        self.fc = nn.Linear(self.config.dim, self.config.dim)
-        self.activ1 = nn.Tanh()
-        self.linear = nn.Linear(self.config.dim, self.config.dim)
-        self.activ2 = gelu
-        self.norm = LayerNorm(self.config)
-        self.classifier = nn.Linear(self.config.dim, 2)
-        # decoder is shared with embedding layer
-        embed_weight = self.transformer.embed.tok_embed.weight
-        n_vocab, n_dim = embed_weight.size()
-        self.decoder = nn.Linear(n_dim, n_vocab, bias=False)
-        self.decoder.weight = embed_weight
-        self.decoder_bias = nn.Parameter(torch.zeros(n_vocab))
+        self.hidden = self.config.dim
+        self.n_layers = self.config.n_layers
+        self.attn_heads = self.config.n_heads
 
-    def forward(self, input_ids, segment_ids, input_mask, masked_pos):
-        h = self.transformer(input_ids, segment_ids, input_mask)
-        pooled_h = self.activ1(self.fc(h[:, 0]))
-        masked_pos = masked_pos[:, :, None].expand(-1, -1, h.size(-1))
-        h_masked = torch.gather(h, 1, masked_pos)
-        h_masked = self.norm(self.activ2(self.linear(h_masked)))
-        logits_lm = self.decoder(h_masked) + self.decoder_bias
-        logits_clsf = self.classifier(pooled_h)
+        self.feed_forward_hidden = self.config.dim_ff
+        self.embedding = Embeddings(self.config)
+        self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
+    
+    def forward(self, x, seg):
+        # attention masking for padded token
+        mask = (x > 0).unsqueeze(1).repeat(1, x.size(1), 1).unsqueeze(1)
 
-        return logits_lm, logits_clsf
+        # embedding the indexed sequence to sequence of vectors
+        x = self.embedding(x, seg)
+
+        # running over multiple transformer blocks
+        for transformer in self.transformer_blocks:
+            x = transformer.forward(x, mask)
+
+        return x
+
+class BERTLM(nn.Module):
+    """
+    BERT Language Model
+    Next Sentence Prediction Model + Masked Language Model
+    """
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.bert = BERT(self.config)
+        self.next_sentence = NextSentencePrediction(self.config)
+        self.mask_lm = MaskedLanguageModel(self.config)
+
+    def forward(self, x, segment_ids):
+        x = self.bert(x, segment_ids)
+        return self.next_sentence(x), self.mask_lm(x)
+
+
+class NextSentencePrediction(nn.Module):
+    """
+    2-class classification model : is_next, is_not_next
+    """
+
+    def __init__(self, config):
+        """
+        :param hidden: BERT model output size
+        """
+        super().__init__()
+        self.linear = nn.Linear(config.dim, 2)
+        self.softmax = nn.LogSoftmax(dim=-1)
+
+    def forward(self, x):
+        return self.softmax(self.linear(x[:, 0]))
+
+
+class MaskedLanguageModel(nn.Module):
+    """
+    predicting origin token from masked input sequence
+    n-class classification problem, n-class = vocab_size
+    """
+
+    def __init__(self, config):
+        """
+        :param hidden: output size of BERT model
+        :param vocab_size: total vocab size
+        """
+        super().__init__()
+        self.linear = nn.Linear(config.dim, config.vocab_size)
+        self.softmax = nn.LogSoftmax(dim=-1)
+
+    def forward(self, x):
+        return self.softmax(self.linear(x))
