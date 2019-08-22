@@ -72,18 +72,24 @@ understanding the relationship, between two text sentences, which is not directl
 ## Results
 
 ```
-Iter (loss=8.964 / NSP_acc=0.302): 100%|███████████████████████████████████████████████████████████████████| 2746/2746 [36:34<00:00,  1.37it/s]
+Iter (loss=8.964 / NSP_acc=0.302): 100%|███████████████████████████████████████████████| 2746/2746 [36:34<00:00,  1.37it/s]
 [INFO]: Epoch 1/50 : Average Loss 16.002 / NSP acc: 0.506
-Iter (loss=4.536 / NSP_acc=0.281): 100%|███████████████████████████████████████████████████████████████████| 2746/2746 [36:28<00:00,  1.37it/s]
+Iter (loss=4.536 / NSP_acc=0.281): 100%|███████████████████████████████████████████████| 2746/2746 [36:28<00:00,  1.37it/s]
 [INFO]: Epoch 2/50 : Average Loss 7.178 / NSP acc: 0.526
-Iter (loss=3.408 / NSP_acc=0.260): 100%|███████████████████████████████████████████████████████████████████| 2746/2746 [36:31<00:00,  1.29it/s]
+Iter (loss=3.408 / NSP_acc=0.260): 100%|███████████████████████████████████████████████| 2746/2746 [36:31<00:00,  1.29it/s]
 [INFO]: Epoch 3/50 : Average Loss 4.440 / NSP acc: 0.544
 ```
 
-In pretraining with Korean corpus(sejong corpus), 300k iteration with 32 batch size, I was able to get 75% of accuracy in Next Sentence Prediction task.
-The average loss goes down to 2.659.
+In pretraining with Korean corpus(sejong corpus), 300k iteration with 32 batch size, I was able to get 78% of accuracy in Next Sentence Prediction task.
+The average loss goes down to 2.643.
 
-I'm preparing English corpus for another experiment. I'm going to post all tensorboard graphs and etc, when the English experiment done. XD
+With Korean corpus, the result of using 32 batch size is better than using 96. It seems that more frequent parameter updating leads to the optima. Pictures below are loss graph of `Language Model Loss` and `Next Sentence Prediction Classification Loss`. They show that the model had been learning about NSP task after language model because of the difference of magnitude of loss values.
+
+![loss_lm](https://user-images.githubusercontent.com/12293076/63478132-6b565e80-c4c3-11e9-9c58-2830f111b05e.png)
+
+![accuracy](https://user-images.githubusercontent.com/12293076/63477724-6db7b900-c4c1-11e9-841c-52c4bc8b7408.png)
+
+I'm preparing English corpus for another experiment. 
 
 ## Usage
 
