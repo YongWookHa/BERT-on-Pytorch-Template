@@ -12,13 +12,13 @@ Pytorch implementation of Google AI's 2018 BERT on [moemen95's Pytorch-Project-T
 
 ![](https://github.com/moemen95/Pytorch-Project-Template/raw/master/utils/assets/class_diagram.png)
 
-[moemen95's Pytorch-Project-Template](https://github.com/moemen95/Pytorch-Project-Template) has a specific structure represented above. It's proposing a baseline for any Pytorch project so that we can only focus on the model implementation. They provide some examples, so click the link and see what are there.
+[moemen95's Pytorch-Project-Template](https://github.com/moemen95/Pytorch-Project-Template) has a specific structure represented above. It's proposing a baseline for any Pytorch project so that we can only focus on the model implementation. It provides some examples as well. So click the [link](https://github.com/moemen95/Pytorch-Project-Template) and see what it is.
 
 ### BERT
 
-This repository is a **reconstruction result** of [dhlee347's Pytorchic BERT](https://github.com/dhlee347/pytorchic-bert) and [codertimo's BERT-pytorch](https://github.com/codertimo/BERT-pytorch) on **pytorch template**. The purpose of this is to learn how pytorch and bert work. So in this repository, `pretraining` and `validating` are only available. 
+This repository is a **reconstruction result** of [dhlee347's Pytorchic BERT](https://github.com/dhlee347/pytorchic-bert) and [codertimo's BERT-pytorch](https://github.com/codertimo/BERT-pytorch) on **Pytorch template**. The purpose of this is to learn how pytorch and bert work. So in this repository, `pretraining` and `validating` are only available. 
 
-For understanding BERT, I recommend to read articles below.
+To understand BERT, I recommend to read articles below.
 
 > (English)
 > * [The Annotated Transformer](http://nlp.seas.harvard.edu/2018/04/03/attention.html)
@@ -34,7 +34,7 @@ For understanding BERT, I recommend to read articles below.
 
 ### Tasks
 
-In the paper, authors uses `masked language model` and `predict next sentence` tasks for pretraining. Here's short explanation of those two (copied from [codertimo's BERT-Pytorch](https://github.com/codertimo/BERT-pytorch)).
+In the paper, authors use `masked language model` and `predict next sentence` tasks for pretraining. Here's short explanation of those two (copied from [codertimo's BERT-Pytorch](https://github.com/codertimo/BERT-pytorch)).
 
 #### Masked Language Model 
 
@@ -83,11 +83,13 @@ Iter (loss=3.408 / NSP_acc=0.260): 100%|█████████████�
 In pretraining with Korean corpus(sejong corpus), 300k iteration with 32 batch size, I was able to get 78% of accuracy in Next Sentence Prediction task.
 The average loss goes down to 2.643.
 
-With Korean corpus, the result of using 32 batch size is better than using 96. It seems that more frequent parameter updating leads to the optima. Pictures below are loss graph of `Language Model Loss` and `Next Sentence Prediction Classification Loss`. They show that the model had been learning about NSP task after language model because of the difference of magnitude of loss values.
+With Korean corpus, the result of using 32 batch size is better than using 96. It seems that more frequent parameter updating leads to the optima. Pictures below are loss graphs of `Language Model Loss` and `Next Sentence Prediction Classification Loss`. 
 
 ![loss_lm](https://user-images.githubusercontent.com/12293076/63478132-6b565e80-c4c3-11e9-9c58-2830f111b05e.png)
 
 ![accuracy](https://user-images.githubusercontent.com/12293076/63477724-6db7b900-c4c1-11e9-841c-52c4bc8b7408.png)
+
+The result shows that the model had been learning about NSP task after language model because of the difference of magnitude of loss values.
 
 I'm preparing English corpus for another experiment. 
 
