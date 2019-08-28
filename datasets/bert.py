@@ -16,7 +16,6 @@ class SentencePairDataset(Dataset):  # tab separated setence pair dataset
         "mode : ['train', 'validate']"
         self.config = config 
         self.max_len = self.config.max_len
-        self.max_pred = self.config.max_pred
         self.mask_prob = self.config.mask_prob
 
         self.indexer = tokenizer.convert_tokens_to_ids
@@ -37,63 +36,67 @@ class SentencePairDataset(Dataset):  # tab separated setence pair dataset
 
             iter_bar = tqdm(range(len(self.lines)), desc="{} data".format(mode))
             for i in iter_bar:
-                self.lines[i] = list(map(self.tokenize, self.lines[i].split('\t')[:2]))
-
+                self.lines[i] = self.lines[i].split('\t')[:2]
 
     def __len__(self):
         "Total number of data"
         return len(self.lines)
     
     def __getitem__(self, idx):
-        tokens_a, tokens_b, is_next = self.random_sent(idx)
-
+        sent_a, sent_b, is_next = self.random_sent(idx)
+        tokens_a, tokens_b = sent_a.split(), sent_b.split()
+        
         truncate_tokens_pair(tokens_a, tokens_b, self.max_len - 3)
 
+        tokens_a, tokens_a_label = self.random_word(tokens_a)
+        tokens_b, tokens_b_label = self.random_word(tokens_b)
+        
         # Add Special Tokens
-        tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
-        segment_ids = [1]*(len(tokens_a)+2) + [2]*(len(tokens_b)+1)
-        input_mask = [1]*len(tokens)
-
-        # For masked Language Models
-        masked_tokens, masked_pos = [], []
-        # the number of prediction is sometimes less than max_pred when sequence is short
-        n_pred = min(self.max_pred, max(1, int(round(len(tokens)*self.mask_prob))))
-        # candidate positions of masked tokens
-        cand_pos = [i for i, token in enumerate(tokens)
-                    if token != '[CLS]' and token != '[SEP]']
-
-        random.shuffle(cand_pos)
-        for pos in cand_pos[:n_pred]:
-            masked_tokens.append(tokens[pos])
-            masked_pos.append(pos)
-            if random.random() < 0.8: # 80%
-                tokens[pos] = '[MASK]'
-            elif random.random() < 0.5: # 10%
-                tokens[pos] = get_random_word(self.vocab)
-        # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
-
-        # Token Indexing
-        input_ids = self.indexer(tokens)
-        masked_ids = self.indexer(masked_tokens)
+        cls_idx = self.indexer('[CLS]')
+        sep_idx = self.indexer('[SEP]')
+    
+        bert_input = [cls_idx] + tokens_a + [sep_idx] + tokens_b + [sep_idx]
+        bert_label = [0] + tokens_a_label + [0] + tokens_b_label + [0]
+        segment_label = [1]*(len(tokens_a)+2) + [2]*(len(tokens_b)+1)
 
         # Zero Padding
-        n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
-        input_mask.extend([0]*n_pad)
+        n_pad = self.max_len - len(bert_input)
+        bert_input.extend([0]*n_pad)
+        bert_label.extend([0]*n_pad)
+        segment_label.extend([0]*n_pad)
 
-        # Zero Padding for masked target
-        if self.max_pred > n_pred:
-            n_pad = self.max_pred - n_pred
-            masked_ids.extend([0]*n_pad)
-            masked_pos.extend([0]*n_pad)
-            masked_weights.extend([0]*n_pad)
+        batch = [bert_input, bert_label, segment_label, is_next]
 
-        batch = (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
-        
-        batch_tensors = [torch.tensor(x, dtype=torch.long) for x in batch]
+        batch_tensors = [torch.tensor(b) for b in batch]
         return batch_tensors
+
+    def random_word(self, tokens):
+        output_label = []
+
+        for i, token in enumerate(tokens):
+            prob = random.random()
+            if prob < 0.15:
+                prob /= 0.15
+
+                # 80% randomly change token to mask token
+                if prob < 0.8:
+                    tokens[i] = self.indexer('[MASK]')
+
+                # 10% randomly change token to random token
+                elif prob < 0.9:
+                    tokens[i] = self.indexer(get_random_word(self.vocab))
+
+                # 10% randomly change token to current token
+                else:
+                    tokens[i] = self.indexer(token)
+
+                output_label.append(self.indexer(token))
+
+            else:
+                tokens[i] = self.indexer(token)
+                output_label.append(0)
+
+        return tokens, output_label
 
     def random_sent(self, idx):
         t1, t2 = self.get_corpus_line(idx)
@@ -108,7 +111,12 @@ class SentencePairDataset(Dataset):  # tab separated setence pair dataset
         return self.lines[idx][0], self.lines[idx][1]
 
     def get_random_line(self):
-        return random.choice(self.lines)[1]
+        x = random.choice(self.lines)[1]
+        for a in x:
+            if isinstance(a, int):
+                print(x)
+                raise ValueError
+        return x
 
 
 class MSRPDataset(Dataset):  # tab separated setence pair dataset
@@ -161,11 +169,11 @@ class MSRPDataset(Dataset):  # tab separated setence pair dataset
         # Add Special Tokens
         tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
         segment_ids = [1]*(len(tokens_a)+2) + [2]*(len(tokens_b)+1)
+        input_mask = [1]*len(tokens)
 
         # For masked Language Models
         masked_tokens, masked_pos = [], []
-        # the number of prediction is sometimes less than max_pred when sequence is short
-        n_pred = min(self.max_len, max(1, int(round(len(tokens)*self.mask_prob))))
+        n_pred = max(1, int(round(len(tokens)*self.mask_prob)))
         # candidate positions of masked tokens
         cand_pos = [i for i, token in enumerate(tokens)
                     if token != '[CLS]' and token != '[SEP]']
@@ -173,11 +181,11 @@ class MSRPDataset(Dataset):  # tab separated setence pair dataset
         random.shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             masked_tokens.append(tokens[pos])
+            masked_pos.append(pos)
             if random.random() < 0.8: # 80%
                 tokens[pos] = '[MASK]'
             elif random.random() < 0.5: # 10%
                 tokens[pos] = get_random_word(self.vocab)
-        # when n_pred < max_pred, we only calculate loss within n_pred
         masked_weights = [1]*len(masked_tokens)
 
         # Token Indexing
@@ -188,13 +196,15 @@ class MSRPDataset(Dataset):  # tab separated setence pair dataset
         n_pad = self.max_len - len(input_ids)
         input_ids.extend([0]*n_pad)
         segment_ids.extend([0]*n_pad)
+        input_mask.extend([0]*n_pad)
 
         # Zero Padding for masked target
-        n_pad = self.max_len - len(masked_ids)
+        n_pad = self.max_len - n_pred
         masked_ids.extend([0]*n_pad)
+        masked_pos.extend([0]*n_pad)
         masked_weights.extend([0]*n_pad)
 
-        batch = (input_ids, segment_ids, masked_ids, masked_weights, is_next)
+        batch = (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
         
         batch_tensors = [torch.tensor(x, dtype=torch.long) for x in batch]
         return batch_tensors

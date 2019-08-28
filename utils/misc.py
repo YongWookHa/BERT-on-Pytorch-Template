@@ -38,7 +38,7 @@ def print_cuda_statistics():
     logger.info('Current cuda device  {}'.format(torch.cuda.current_device()))
 
 
-def truncate_tokens_pair(tokens_a, tokens_b, max_len):
+def truncate_tokens_pair(tokens_a:list, tokens_b:list, max_len):
     while True:
         if len(tokens_a) + len(tokens_b) <= max_len:
             break

@@ -33,18 +33,18 @@ class BERTAgent(BaseAgent):
 
         self.model = BERTLM(self.config)
 
-        self.criterion = nn.NLLLoss(ignore_index=0)
+        self.criterion =  nn.NLLLoss(ignore_index=0)
 
         self.optimizer = optim4GPU(self.config, self.model)
         self.writer = SummaryWriter(log_dir=self.config.log_dir)
 
         tokenizer = FullTokenizer(self.config, do_lower_case=True)
 
-        if self.config.dataset == "MSRP":
+        if self.config.dataset_name == "MSRP":
             train_dataset = MSRPDataset(self.config, tokenizer, 'train')
             validate_dataset = MSRPDataset(self.config, tokenizer, 'validate')
             self.logger.info("Start MSRP dataset loading")
-        elif self.config.dataset == "SentencePair":
+        elif self.config.dataset_name == "SentencePair":
             train_dataset = SentencePairDataset(self.config, tokenizer, 'train')
             validate_dataset = SentencePairDataset(self.config, tokenizer, 'validate')
             self.logger.info("Start SentencePair dataset loading")
@@ -176,15 +176,15 @@ class BERTAgent(BaseAgent):
         self.logger.info('Epoch %d/%d : Average Loss %5.3f / NSP acc: %5.3f'%(self.current_epoch, self.config.n_epochs, loss_sum/(i+1), acc_sum/(i+1))) 
 
     def get_loss(self, batch) -> torch.tensor :
-        bert_input, segment_label, bert_label, masked_weights, is_next = batch
         # input_mask, masked_pos
+        bert_input, bert_label, segment_label, is_next = batch
+
         next_sent_output, mask_lm_output = self.model(bert_input, segment_label)
 
         next_loss = self.criterion(next_sent_output, is_next)
 
         mask_loss = self.criterion(mask_lm_output.transpose(1, 2), bert_label)
-        mask_loss = (mask_loss*masked_weights.float()).mean()
-        
+
         loss = next_loss + mask_loss
 
         correct = next_sent_output.argmax(dim=-1).eq(is_next).sum().item()

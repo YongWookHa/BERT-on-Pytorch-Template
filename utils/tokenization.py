@@ -81,12 +81,21 @@ def load_vocab(vocab_file):
 def convert_tokens_to_ids(vocab, tokens):
     """Converts a sequence of tokens into ids using the vocab."""
     ids = []
-    for token in tokens:
+    if isinstance(tokens, list):
+        for token in tokens:
+            try:
+                ids.append(vocab[token])
+            except KeyError:
+                ids.append(vocab['<unk>'])
+        return ids
+    elif isinstance(tokens, str):
         try:
-            ids.append(vocab[token])
+            res = vocab[tokens]
         except KeyError:
-            ids.append(vocab['<unk>'])
-    return ids
+            res = vocab['<unk>']
+        return res
+    else:
+        raise ValueError("tokens expected to be list or str but get %s" % type(tokens))
 
 
 def whitespace_tokenize(text):

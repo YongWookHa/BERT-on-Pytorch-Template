@@ -69,8 +69,7 @@ class MultiheadedSelfAttention(nn.Module):
         # (B, H, S, W) @ (B, H, W, S) -> (B, H, S, S) -softmax-> (B, H, S, S)
         scores = q @ k.transpose(-2, -1) / np.sqrt(k.size(-1))
         if mask is not None:
-            mask = mask.float()
-            scores -= 10000.0 * (1.0 - mask)
+            scores = scores.masked_fill(mask == 0, -1e9)
         scores = self.drop(F.softmax(scores, dim=-1))
         # (B, H, S, S) @ (B, H, S, W) - > (B, H, S, W) -trans -> (B, S, H, W)
         h = (scores @ v).transpose(1, 2).contiguous()
@@ -86,7 +85,7 @@ class PositionWiseFeedForward(nn.Module):
         self.fc1 = nn.Linear(config.dim, config.dim_ff)
         self.fc2 = nn.Linear(config.dim_ff, config.dim)
         
-    def forward(sefl, x):
+    def forward(self, x):
         # (B, S, D) -> (B, S, D_ff) -> (B, S ,D)
         return self.fc2(gelu(self.fc1(x)))
 
@@ -104,7 +103,7 @@ class TransformerBlock(nn.Module):
     def forward(self, x, mask):
         h = self.attn(x, mask)
         h = self.norm1(x + self.drop(self.proj(h)))
-        h = self.norm2(h + self.drop(self.proj(h)))
+        h = self.norm2(h + self.drop(self.pwff(h)))
         return h
 
 class BERT(nn.Module):
@@ -114,10 +113,10 @@ class BERT(nn.Module):
         self.hidden = self.config.dim
         self.n_layers = self.config.n_layers
         self.attn_heads = self.config.n_heads
-
         self.feed_forward_hidden = self.config.dim_ff
+
         self.embedding = Embeddings(self.config)
-        self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
+        self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(self.n_layers)])
     
     def forward(self, x, seg):
         # attention masking for padded token
@@ -182,4 +181,6 @@ class MaskedLanguageModel(nn.Module):
         self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x):
+    #     masked_pos = masked_pos[:, :, None].expand(-1, -1, x.size(-1))
+    #     x_masked = torch.gather(x, 1, masked_pos)
         return self.softmax(self.linear(x))
