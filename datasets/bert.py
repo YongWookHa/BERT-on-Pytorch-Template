@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset, Dataset
 from utils.tokenization import FullTokenizer
 from utils.misc import truncate_tokens_pair, get_random_word
 
-class SentencePairDataset(Dataset):  # msr_paraphrase dataset
+class SentencePairDataset(Dataset):
     def __init__(self, config, tokenizer, mode):
         "mode : ['train', 'validate']"
         self.config = config 
@@ -35,7 +35,7 @@ class SentencePairDataset(Dataset):  # msr_paraphrase dataset
             else:
                 raise ValueError("Invalid Mode: '{}'".format(mode))
 
-            iter_bar = tqdm(range(len(self.lines)), desc="{} data".format(mode))
+            iter_bar = tqdm(range(len(self.lines)), desc="{} data".format(mode), ncols=80)
             for i in iter_bar:
                 self.lines[i] = list(map(self.tokenize, self.lines[i].split('\t')[:2]))
 

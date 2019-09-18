@@ -93,7 +93,7 @@ class PositionWiseFeedForward(nn.Module):
         self.fc1 = nn.Linear(config.dim, config.dim_ff)
         self.fc2 = nn.Linear(config.dim_ff, config.dim)
         
-    def forward(sefl, x):
+    def forward(self, x):
         # (B, S, D) -> (B, S, D_ff) -> (B, S ,D)
         return self.fc2(gelu(self.fc1(x)))
 
@@ -111,7 +111,7 @@ class Block(nn.Module):
     def forward(self, x, mask):
         h = self.attn(x, mask)
         h = self.norm1(x + self.drop(self.proj(h)))
-        h = self.norm2(h + self.drop(self.proj(h)))
+        h = self.norm2(h + self.drop(self.pwff(h)))
         return h
 
 class Transformer(nn.Module):

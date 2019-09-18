@@ -203,7 +203,7 @@ class BytePairEncodingTokenizer(object):
     
     def __init__(self, config):
         prefix = os.path.join('experiments', config.exp_name, 'bpe')
-        cmd = '--input={} --vocab_size={} --model_prefix={}'
+        cmd = '--input={} --vocab_size={} --model_prefix={} --input_sentence_size=10000000 --shuffle_input_sentence=true'
         cmd = cmd.format(config.data_path, config.vocab_size, prefix)
         try:
             if not os.path.exists(prefix+'.model'):

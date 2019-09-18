@@ -1,3 +1,6 @@
+# Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team,
+# and Dong-Hyun Lee, Kakao Brain.
+
 import math 
 import torch
 from torch.optim import Optimizer
@@ -108,7 +111,7 @@ class BertAdam(Optimizer):
                 # In-place operations to update the averages at the same time
                 next_m.mul_(beta1).add_(1 - beta1, grad)
                 next_v.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                update = next_m / (next_v.sqrt() + group['e'])
+                update = next_m / (next_v.sqrt() + group['e'])  # e for epsilon
 
                 # Just adding the square of the weights to the loss function is *not*
                 # the correct way of using L2 regularization/weight decay with Adam,
@@ -117,12 +120,13 @@ class BertAdam(Optimizer):
                 # Instead we want to decay the weights in a manner that doesn't interact
                 # with the m/v parameters. This is equivalent to adding the square
                 # of the weights to the loss with plain (non-momentum) SGD.
+
                 if group['weight_decay_rate'] > 0.0:
-                    update += group['weight_decay_rate'] * p.data
+                   update += group['weight_decay_rate'] * p.data
 
                 if group['t_total'] != -1:
                     schedule_fct = SCHEDULES[group['schedule']]
-                    lr_scheduled = group['lr'] * schedule_fct(state['step']/group['t_total'], group['warmup'])
+                    lr_scheduled = group['lr'] * schedule_fct(state['step'] / group['t_total'], group['warmup'])
                 else:
                     lr_scheduled = group['lr']
 
@@ -144,7 +148,7 @@ def optim4GPU(cfg, model):
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'gamma', 'beta']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if n not in no_decay], 'weight_decay_rate': 0.01},
+        {'params': [p for n, p in param_optimizer if n not in no_decay], 'weight_decay_rate': cfg.weight_decay},
         {'params': [p for n, p in param_optimizer if n in no_decay], 'weight_decay_rate': 0.0}]
     return BertAdam(optimizer_grouped_parameters,
                     lr=cfg.lr,

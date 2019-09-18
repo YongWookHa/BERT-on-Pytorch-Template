@@ -141,7 +141,7 @@ class BERTAgent(BaseAgent):
         One epoch of training
         :return:
         """
-        iter_bar = tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader), desc="Iter (loss=X.XXX)")
+        iter_bar = tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader), desc="Iter (loss=X.XXX)", ncols=80)
 
         loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
         acc_sum = 0.
